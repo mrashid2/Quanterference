@@ -364,7 +364,7 @@ if __name__ == '__main__':
     #parser.add_argument('--test_workloads', nargs='+', default=['/Users/chris/Downloads/darshan-analysis/python-files/data_files/h5bench-amrex', '/Users/chris/Downloads/darshan-analysis/python-files/data_files/h5bench-openpmd', '/Users/chris/Downloads/darshan-analysis/python-files/data_files/enzo', '/Users/chris/Downloads/darshan-analysis/python-files/data_files/io500', '/Users/chris/Downloads/darshan-analysis/python-files/data_files/dlio_bench_unet3d', '/Users/chris/Downloads/darshan-analysis/python-files/data_files/dlio_bench_bert'])
     parser.add_argument('--test_workloads', nargs='+', default=['/Users/chris/Downloads/darshan-analysis/python-files/data_files/enzo'])
     parser.add_argument('--epochs', type=int, default=1000)
-    parser.add_argument('--fine_tune', action='store_true', default=True)
+    parser.add_argument('--fine_tune', action='store_true', default=False)
     parser.add_argument('--fine_tune_workloads', nargs='+', default=['/Users/chris/Downloads/darshan-analysis/python-files/data_files/dlio_bench_unet3d', '/Users/chris/Downloads/darshan-analysis/python-files/data_files/dlio_bench_bert', '/Users/chris/Downloads/darshan-analysis/python-files/data_files/h5bench-amrex', '/Users/chris/Downloads/darshan-analysis/python-files/data_files/h5bench-openpmd', '/Users/chris/Downloads/darshan-analysis/python-files/data_files/enzo'])
     parser.add_argument('--fine_tune_epochs', type=int, default=30)
     parser.add_argument('--bin_thresholds', nargs='+', type=int, default=[2])
