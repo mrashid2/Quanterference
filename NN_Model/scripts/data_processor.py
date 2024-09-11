@@ -1,12 +1,7 @@
-import argparse
 import os
 import numpy as np
 import json
-import pandas as pd
-import matplotlib.pyplot as plt
-import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader
-import matplotlib.pyplot as plt
+from torch.utils.data import Dataset
 import pickle
 from sklearn.preprocessing import StandardScaler
 
@@ -38,7 +33,7 @@ def parse_data(data_dirs, train=True):
                         if int(file.split('_')[1]) > 15:
                             continue
                     else:
-                        if int(file.split('_')[1]) > 10:
+                        if int(file.split('_')[1]) > 15:
                             continue
                     window_size = file.split('_')[1] + '_' + str(index)
                 else:
@@ -62,8 +57,6 @@ def scale(mdt_features, ost_features, scaler=None, save_scaler=None):
                 pickle.dump(mdt_scaler, f)
             with open(f'{save_scaler}_ost', 'wb') as f:
                 pickle.dump(ost_scaler, f)
-        else:
-            print("SCALER IS NOT SAVED AS PATH WAS NOT PROVIDED")
     else:
         # load the scaler
         with open(f'{scaler}_mdt', 'rb') as f:
@@ -76,13 +69,14 @@ def scale(mdt_features, ost_features, scaler=None, save_scaler=None):
     return ost_features, mdt_features, scaler
 
 class MetricsDataset(Dataset):
-    def __init__(self, workload_dirs, train=True, bin_thresholds=[2.0], scaler=None, augment=False):
+    def __init__(self, workload_dirs, train=True, bin_thresholds=[2.0], scaler=None, augment=False, scaler_path=None):
         self.workload_dirs = workload_dirs
         self.train = train
         self.augment = augment
         self.num_bins = len(bin_thresholds) + 1
         self.bin_thresholds = bin_thresholds
         self.scaler = scaler
+        self.scaler_path = scaler_path
         self.mdt_features = []
         self.ost_features = []
         self.target = []
@@ -156,15 +150,11 @@ class MetricsDataset(Dataset):
                                 total_idx += 1
                             
                             
-        print(f"Total number of data points: {total_idx}")
-
         self.target = np.array(self.target)
         self.target = np.digitize(self.target, self.bin_thresholds)
         self.target = np.eye(self.num_bins)[self.target]
         self.ost_features = np.array(self.ost_features)
         self.mdt_features = np.array(self.mdt_features)
-        print(f"ost_features shape: {self.ost_features.shape}")
-        print(f"mdt_features shape: {self.mdt_features.shape}")
         self.ost_features = np.nan_to_num(self.ost_features, nan=0)
         self.mdt_features = np.nan_to_num(self.mdt_features, nan=0)
         if self.num_bins == 2:
@@ -173,13 +163,8 @@ class MetricsDataset(Dataset):
             self.target = self.target.reshape(-1, 1)
         else:
             self.target = self.target.reshape(-1, self.num_bins)
-        print(f"sum of target: {np.sum(self.target, axis=0)}")
         
-        print(f"target shape: {self.target.shape}")
-       # print(f"target: {self.target}")
-        print(f"postive samples: {np.sum(self.target)}")
-        print(f"negative samples: {len(self.target) - np.sum(self.target)}")
-        self.ost_features, self.mdt_features, self.scaler = scale(self.mdt_features, self.ost_features, self.scaler, save_scaler='scaler' if self.train else None)
+        self.ost_features, self.mdt_features, self.scaler = scale(self.mdt_features, self.ost_features, self.scaler, save_scaler=self.scaler_path if self.train else None)
 
     def __len__(self):
         return len(self.target)
