@@ -11,3 +11,5 @@ The organization of this repository is the following:
       - [data](./NN_Model/data) contains the raw data collected from each application split into train and test sets for model training and evaluation
       - [model](./NN_Model/model) contains the trained model .pkl file
       - [scripts](./NN_Model/scripts) contains the model training and evaluation script
+ - [run_model_loop.py](./run_model_loop.py) is a runnable script which recreates the confusion matrix results show in figures 3 and 5. The script trains a model on each workload and tests the trained model on the corresponding test set for each workload.
+      - Note: While running the the script the confusion matrices for each workload will be saved to the [eval_results](./eval_results/) directory
