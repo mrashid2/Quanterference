@@ -49,7 +49,10 @@ class SensitivityModel(nn.Module):
         #self.fc_hidden = nn.Linear(hidden_size, hidden_size)
         self.fc_out = nn.Linear(hidden_size, output_size)
         self.relu = nn.ReLU()
-        self.sigmoid = nn.Sigmoid()
+        if output_size == 1:
+            self.last_activation = nn.Sigmoid()
+        else:
+            self.last_activation = nn.Softmax(dim=1)
 
     def mdt_forward(self, mdt):
         mdt = mdt.view(-1, mdt.shape[-1])
@@ -82,28 +85,35 @@ class SensitivityModel(nn.Module):
         #x = self.fc_hidden(x)
         #x = self.relu(x)
         x = self.fc_out(x)
-        x = self.sigmoid(x)
+        x = self.last_activation(x)
         return x
+    
 
-def train_model(model, train_loader, valid_loader, epochs=100000, lr=0.0005):
-    criterion = nn.BCELoss()
+def train_model(model, train_loader, valid_loader, epochs=100000, lr=0.0005, num_bins=2):
+    if num_bins == 2:
+        criterion = nn.BCELoss()
+    else:
+        criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     train_losses = []
     valid_losses = []
     train_f1 = []
     valid_f1 = []
-    best_model = model
     loss_steps = 5000
     train_loss = 0
     idx = 0
     for epoch in range(epochs):
+        print(f'Currently running Epoch {epoch}')
         model.train()
         train_metrics = {'tp': 0, 'fp': 0, 'tn': 0, 'fn': 0}
         valid_metrics = {'tp': 0, 'fp': 0, 'tn': 0, 'fn': 0}
         for mdt_window, ost_window, labels in train_loader:
             mdt_window = mdt_window.float()
             ost_window = ost_window.float()
-            labels = labels.float()
+            if num_bins == 2:
+                labels = labels.float()
+            else:
+                labels = labels.argmax(dim=1)  # Convert one-hot to class indices
             optimizer.zero_grad()
             output = model(mdt_window, ost_window)
             loss = criterion(output, labels)
@@ -111,49 +121,24 @@ def train_model(model, train_loader, valid_loader, epochs=100000, lr=0.0005):
             optimizer.step()
             loss_val = loss.item()
             train_loss += loss_val
-            for i in range(len(output)):
-                if output[i] > 0.5:
-                    if labels[i] == 1:
-                        train_metrics['tp'] += 1
+            if num_bins == 2:
+                for i in range(len(output)):
+                    if output[i] > 0.5:
+                        if labels[i] == 1:
+                            train_metrics['tp'] += 1
+                        else:
+                            train_metrics['fp'] += 1
                     else:
-                        train_metrics['fp'] += 1
-                else:
-                    if labels[i] == 0:
-                        train_metrics['tn'] += 1
-                    else:
-                        train_metrics['fn'] += 1
+                        if labels[i] == 0:
+                            train_metrics['tn'] += 1
+                        else:
+                            train_metrics['fn'] += 1
             idx += 1
 
             if idx % loss_steps == 0:
                 train_losses.append(train_loss)
                 train_loss = 0
 
-                #valid_loss = 0
-                #best_valid_loss = float('inf')
-                #valid_metrics = {'tp': 0, 'fp': 0, 'tn': 0, 'fn': 0}
-                """
-                with torch.no_grad():
-                    model.eval()
-                    for mdt_window, ost_window, labels in valid_loader:
-                        mdt_window = mdt_window.float()
-                        ost_window = ost_window.float()
-                        labels = labels.float()
-                        output = model(mdt_window, ost_window)
-                        loss = criterion(output, labels)
-                        valid_loss += loss.item()
-                        for i in range(len(output)):
-                            if output[i] > 0.5:
-                                if labels[i] == 1:
-                                    valid_metrics['tp'] += 1
-                                else:
-                                    valid_metrics['fp'] += 1
-                            else:
-                                if labels[i] == 0:
-                                    valid_metrics['tn'] += 1
-                                else:
-                                    valid_metrics['fn'] += 1
-                    valid_losses.append(valid_loss)
-                """
         
         with torch.no_grad():
             model.eval()
@@ -161,64 +146,65 @@ def train_model(model, train_loader, valid_loader, epochs=100000, lr=0.0005):
             for mdt_window, ost_window, labels in valid_loader:
                 mdt_window = mdt_window.float()
                 ost_window = ost_window.float()
-                labels = labels.float()
+                if num_bins == 2:
+                    labels = labels.float()
+                else:
+                    labels = labels.argmax(dim=1)  # Convert one-hot to class indices
                 output = model(mdt_window, ost_window)
                 loss = criterion(output, labels)
                 valid_loss += loss.item()
-                for i in range(len(output)):
-                    if output[i] > 0.5:
-                        if labels[i] == 1:
-                            valid_metrics['tp'] += 1
+                valid_losses.append(valid_loss)
+                if num_bins == 2:
+                    for i in range(len(output)):
+                        if output[i] > 0.5:
+                            if labels[i] == 1:
+                                valid_metrics['tp'] += 1
+                            else:
+                                valid_metrics['fp'] += 1
                         else:
-                            valid_metrics['fp'] += 1
-                    else:
-                        if labels[i] == 0:
-                            valid_metrics['tn'] += 1
-                        else:
-                            valid_metrics['fn'] += 1
-            valid_losses.append(valid_loss)
+                            if labels[i] == 0:
+                                valid_metrics['tn'] += 1
+                            else:
+                                valid_metrics['fn'] += 1
+            
 
-        print(f'Epoch {epoch} Train Loss: {train_loss}')
-        print(f'TP: {train_metrics["tp"]} FP: {train_metrics["fp"]} TN: {train_metrics["tn"]} FN: {train_metrics["fn"]}')
-        try:
-            precision = train_metrics['tp'] / (train_metrics['tp'] + train_metrics['fp'])
-        except:
-            precision = 0
-        try:
-            recall = train_metrics['tp'] / (train_metrics['tp'] + train_metrics['fn'])
-        except:
-            recall = 0
-        try:
-            f1 = 2 * (precision * recall) / (precision + recall)
-        except:
-            f1 = 0
-        train_f1.append(f1)
-        print(f'TRAIN: Precision: {precision} Recall: {recall} F1: {f1}')
-        try:
-            precision = valid_metrics['tp'] / (valid_metrics['tp'] + valid_metrics['fp'])
-        except:
-            precision = 0
-        try:
-            recall = valid_metrics['tp'] / (valid_metrics['tp'] + valid_metrics['fn'])
-        except:
-            recall = 0
-        try:
-            f1 = 2 * (precision * recall) / (precision + recall)
-        except:
-            f1 = 0
-        valid_f1.append(f1)
-        print(f'TP: {valid_metrics["tp"]} FP: {valid_metrics["fp"]} TN: {valid_metrics["tn"]} FN: {valid_metrics["fn"]}')
-        print(f'VALID: Precision: {precision} Recall: {recall} F1: {f1}\n')
-    best_model = model
-    return best_model, train_losses, valid_losses, train_f1, valid_f1
+        if num_bins == 2:
+            print(f'Epoch {epoch} Train Loss: {train_loss}')
+            print(f'TP: {train_metrics["tp"]} FP: {train_metrics["fp"]} TN: {train_metrics["tn"]} FN: {train_metrics["fn"]}')
+            try:
+                precision = train_metrics['tp'] / (train_metrics['tp'] + train_metrics['fp'])
+            except:
+                precision = 0
+            try:
+                recall = train_metrics['tp'] / (train_metrics['tp'] + train_metrics['fn'])
+            except:
+                recall = 0
+            try:
+                f1 = 2 * (precision * recall) / (precision + recall)
+            except:
+                f1 = 0
+            train_f1.append(f1)
+            print(f'TRAIN: Precision: {precision} Recall: {recall} F1: {f1}')
+            try:
+                precision = valid_metrics['tp'] / (valid_metrics['tp'] + valid_metrics['fp'])
+            except:
+                precision = 0
+            try:
+                recall = valid_metrics['tp'] / (valid_metrics['tp'] + valid_metrics['fn'])
+            except:
+                recall = 0
+            try:
+                f1 = 2 * (precision * recall) / (precision + recall)
+            except:
+                f1 = 0
+            valid_f1.append(f1)
+            print(f'TP: {valid_metrics["tp"]} FP: {valid_metrics["fp"]} TN: {valid_metrics["tn"]} FN: {valid_metrics["fn"]}')
+            print(f'VALID: Precision: {precision} Recall: {recall} F1: {f1}\n')
+    return model, train_losses, valid_losses, train_f1, valid_f1
 
-def test_model(model, test_datasets, before_fine_tune, fine_tune_steps=0, results_path='../results/'):
+def test_model(model, test_datasets, results_path='../results/', num_bins=2):
     cm = None
     for test_loader, name in test_datasets:
-        tp = 0
-        fp = 0
-        tn = 0
-        fn = 0
         all_labels = []
         all_preds = []
         with torch.no_grad():
@@ -226,38 +212,42 @@ def test_model(model, test_datasets, before_fine_tune, fine_tune_steps=0, result
             for mdt_window, ost_window, labels in test_loader:
                 mdt_window = mdt_window.float()
                 ost_window = ost_window.float()
-                labels = labels.float()
+                if num_bins == 2:
+                    labels = labels.float()
+                else:
+                    labels = labels.argmax(dim=1)  # Convert one-hot to class indices
                 output = model(mdt_window, ost_window)
                 for i in range(len(output)):
-                    all_labels.append(labels[i])
-                    if output[i] > 0.5:
-                        
-                        all_preds.append(1)
-                        if labels[i] == 1:
-                            tp += 1
-                        else:
-                            fp += 1
-                    else:
-                        all_preds.append(0)
-                        if labels[i] == 0:
-                            tn += 1
-                        else:
-                            fn += 1
-        try:
-            precision = tp / (tp + fp)
-        except:
-            precision = 0
-        try:
-            recall = tp / (tp + fn)
-        except:
-            recall = 0
-        try:
-            f1 = 2 * (precision * recall) / (precision + recall)
-        except:
-            f1 = 0
-        print(f'{name} TestResults')
-        print(f'\t\tTP: {tp} FP: {fp} TN: {tn} FN: {fn}')
-        print(f'\t\tPrecision: {precision} Recall: {recall} F1: {f1}')
+                    if num_bins == 2:
+                        all_labels.append(int(labels[i]))
+                        pred = 1 if output[i] > 0.5 else 0
+                        all_preds.append(pred)
+                    else:  # num_bins == 3
+                        all_labels.append(int(labels[i]))
+                        all_preds.append(torch.argmax(output[i]))
+
+
+        if num_bins == 2:
+            tp = sum((p == 1 and l == 1) for p, l in zip(all_preds, all_labels))
+            fp = sum((p == 1 and l == 0) for p, l in zip(all_preds, all_labels))
+            tn = sum((p == 0 and l == 0) for p, l in zip(all_preds, all_labels))
+            fn = sum((p == 0 and l == 1) for p, l in zip(all_preds, all_labels))
+
+            try:
+                precision = tp / (tp + fp)
+            except:
+                precision = 0
+            try:
+                recall = tp / (tp + fn)
+            except:
+                recall = 0
+            try:
+                f1 = 2 * (precision * recall) / (precision + recall)
+            except:
+                f1 = 0
+            print(f'{name} TestResults')
+            print(f'\t\tTP: {tp} FP: {fp} TN: {tn} FN: {fn}')
+            print(f'\t\tPrecision: {precision} Recall: {recall} F1: {f1}')
 
         new_cm = confusion_matrix(all_labels, all_preds)
         if cm is None:
@@ -266,14 +256,26 @@ def test_model(model, test_datasets, before_fine_tune, fine_tune_steps=0, result
             cm += new_cm
 
     # save confusion matrix
-    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=['< 2', '>= 2'])
-    # save confusion matrix as png
+    if num_bins == 2:
+        disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=['< 2', '>= 2'])
+    else:  # num_bins == 3
+        disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=['< 2', '[2, 5)', '>= 5'])
+    
     disp.plot(cmap='Blues')
 
-    if before_fine_tune:
-        plt.savefig(f'{results_path}/confusion_matrix_{name}.png')
-    else:
-        plt.savefig(f'{results_path}/confusion_matrix_{name}_after_fine_tune_{fine_tune_steps}.png')
+    if num_bins == 3:
+        plt.savefig(f'{results_path}/confusion_matrix_io500_3bins_[Fig4].png')
+    elif 'dlio' in name:
+        plt.savefig(f'{results_path}/confusion_matrix_dlio_[Fig3.b].png')
+    elif 'io500' in name:
+        plt.savefig(f'{results_path}/confusion_matrix_io500_[Fig3.a].png')
+    elif 'amrex' in name:
+        plt.savefig(f'{results_path}/confusion_matrix_amrex_[Fig5.a].png')
+    elif 'enzo' in name:
+        plt.savefig(f'{results_path}/confusion_matrix_enzo_[Fig5.b].png')
+    elif 'openpmd' in name:
+        plt.savefig(f'{results_path}/confusion_matrix_openpmd_[Fig5.c].png')
+
 
 
 
@@ -289,13 +291,17 @@ if __name__ == '__main__':
     parser.add_argument('--results_path', type=str, default='../results/')
     parser.add_argument('--test_workloads', nargs='+', default=['/Users/chris/Downloads/darshan-analysis/python-files/data_files/io500'])
     parser.add_argument('--epochs', type=int, default=10)
-    parser.add_argument('--bin_thresholds', nargs='+', type=int, default=[2])
+    parser.add_argument('--output_bins', type=int, default=2)
     args = parser.parse_args()
 
+    if args.output_bins == 2:
+        bin_thresholds = [2]
+    elif args.output_bins == 3:
+        bin_thresholds = [2, 5]
+
     if args.train:
-        train_dataset = MetricsDataset(args.train_workloads, True, args.bin_thresholds, augment=args.augment, scaler_path=args.scaler_path)
+        train_dataset = MetricsDataset(args.train_workloads, True, bin_thresholds, augment=args.augment, scaler_path=args.scaler_path)
         scaler = train_dataset.scaler
-        #train_dataset = MetricsDataset(args.train_workloads, True, args.bin_thresholds, augment=args.augment, scaler=scaler)
         if args.train_set_proportion < 1.0:
             train_size = int(args.train_set_proportion * len(train_dataset))
             train_dataset, _ = torch.utils.data.random_split(train_dataset, [train_size, len(train_dataset)-train_size])
@@ -306,7 +312,7 @@ if __name__ == '__main__':
     test_datasets = []
     valid_datasets = []
     for workload in args.test_workloads:     
-        test_dataset = MetricsDataset([workload], False, args.bin_thresholds, scaler)
+        test_dataset = MetricsDataset([workload], False, bin_thresholds, scaler)
         test_loader = DataLoader(test_dataset, batch_size=1, shuffle=True)
         test_size = int(0.8 * len(test_dataset))
 
@@ -328,11 +334,14 @@ if __name__ == '__main__':
 
 
     if args.train:
-        model = SensitivityModel()
+        if args.output_bins == 2:
+            model = SensitivityModel(output_size=1)
+        else:
+            model = SensitivityModel(output_size=args.output_bins)
         print(model)
         total_params = sum(p.numel() for p in model.parameters())
         print(f'Total number of parameters: {total_params}')
-        model, train_losses, valid_losses, train_f1, valid_f1 = train_model(model, train_loader, valid_loader, epochs=args.epochs)
+        model, train_losses, valid_losses, train_f1, valid_f1 = train_model(model, train_loader, valid_loader, epochs=args.epochs, num_bins=args.output_bins)
         fig = plt.figure()
         steps = np.array(range(len(train_losses))) * 5000
         train_losses = np.array(train_losses) / 5000
@@ -349,16 +358,15 @@ if __name__ == '__main__':
                 test_workload += "_" + workload.split('/')[-1]
         else:
             test_workload = args.test_workloads[0].split('/')[-1]
-        plt.savefig(args.results_path + '/loss_' + test_workload + '.png')
 
-        with open(f"{args.model_path}_model.pkl", 'wb') as f:
+        with open(f"{args.model_path}_{args.output_bins}bins_model.pkl", 'wb') as f:
             pickle.dump(model, f)
     else:
-        with open(f"{args.model_path}_model.pkl", 'rb') as f:
+        with open(f"{args.model_path}_{args.output_bins}bins_model.pkl", 'rb') as f:
             model = pickle.load(f)
         total_params = sum(p.numel() for p in model.parameters())
 
-    test_model(model, test_datasets, before_fine_tune=True, results_path=args.results_path)
+    test_model(model, test_datasets, results_path=args.results_path, num_bins=args.output_bins)
 
 
 
